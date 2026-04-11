@@ -28,8 +28,8 @@ theme_set(theme_minimal())
 # 2. Carga e inspección inicial de datos
 # ------------------------------------------------------------
 
-datos_por <- read_csv2("student-por.csv")
-datos_mat <- read_csv2("student-mat.csv")
+datos_por <- read.csv2("student-por.csv")
+datos_mat <- read.csv2("student-mat.csv")
 
 
 # Inspección básica
@@ -436,7 +436,85 @@ par(mfrow = c(1, 1))
 
 
 # ------------------------------------------------------------
-# 13. Modelos Escenario A (con notas previas)
+# 13. Búsqueda de hiperparámetros óptimos
+# ------------------------------------------------------------
+
+control_hp <- trainControl(
+  method = "cv",
+  number = 5,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary
+)
+
+# --- Árbol de decisión Escenario A ---
+grid_arbol <- expand.grid(cp = seq(0.001, 0.05, by = 0.005))
+
+busqueda_arbol_A <- train(
+  riesgo_suspenso ~ .,
+  data = train_A_balanced,
+  method = "rpart",
+  trControl = control_hp,
+  tuneGrid = grid_arbol,
+  metric = "ROC"
+)
+
+print(busqueda_arbol_A)
+plot(busqueda_arbol_A, main = "Selección de hiperparámetro cp - Árbol Escenario A")
+cp_optimo_A <- busqueda_arbol_A$bestTune$cp
+cat("cp óptimo Escenario A:", cp_optimo_A, "\n")
+
+# --- Random Forest Escenario A ---
+grid_rf <- expand.grid(mtry = c(2, 3, 4, 5, 6, 7))
+
+busqueda_rf_A <- train(
+  riesgo_suspenso ~ .,
+  data = train_A_balanced,
+  method = "rf",
+  trControl = control_hp,
+  tuneGrid = grid_rf,
+  metric = "ROC",
+  ntree = 100
+)
+
+print(busqueda_rf_A)
+plot(busqueda_rf_A, main = "Selección de hiperparámetro mtry - RF Escenario A")
+mtry_optimo_A <- busqueda_rf_A$bestTune$mtry
+cat("mtry óptimo Escenario A:", mtry_optimo_A, "\n")
+
+# --- Árbol de decisión Escenario B ---
+busqueda_arbol_B <- train(
+  riesgo_suspenso ~ .,
+  data = train_B_balanced,
+  method = "rpart",
+  trControl = control_hp,
+  tuneGrid = grid_arbol,
+  metric = "ROC"
+)
+
+print(busqueda_arbol_B)
+plot(busqueda_arbol_B, main = "Selección de hiperparámetro cp - Árbol Escenario B")
+cp_optimo_B <- busqueda_arbol_B$bestTune$cp
+cat("cp óptimo Escenario B:", cp_optimo_B, "\n")
+
+# --- Random Forest Escenario B ---
+busqueda_rf_B <- train(
+  riesgo_suspenso ~ .,
+  data = train_B_balanced,
+  method = "rf",
+  trControl = control_hp,
+  tuneGrid = grid_rf,
+  metric = "ROC",
+  ntree = 100
+)
+
+print(busqueda_rf_B)
+plot(busqueda_rf_B, main = "Selección de hiperparámetro mtry - RF Escenario B")
+mtry_optimo_B <- busqueda_rf_B$bestTune$mtry
+cat("mtry óptimo Escenario B:", mtry_optimo_B, "\n")
+
+
+# ------------------------------------------------------------
+# 14. Modelos Escenario A (con notas previas)
 # ------------------------------------------------------------
 
 # --- Regresión Logística ---
@@ -528,7 +606,8 @@ auc(roc_A)
 
 # --- Árbol de decisión ---
 
-modelo_arbol_A <- rpart(riesgo_suspenso ~ ., data = train_A_balanced, method = "class")
+modelo_arbol_A <- rpart(riesgo_suspenso ~ ., data = train_A_balanced, method = "class",
+                        control = rpart.control(cp = cp_optimo_A))
 rpart.plot(modelo_arbol_A)
 
 pred_arbol_A <- predict(modelo_arbol_A, newdata = test_A, type = "class")
@@ -561,7 +640,7 @@ auc(roc_arbol_A)
 
 # --- Random Forest ---
 
-modelo_rf_A <- randomForest(riesgo_suspenso ~ ., data = train_A_balanced, ntree = 100, mtry = 3)
+modelo_rf_A <- randomForest(riesgo_suspenso ~ ., data = train_A_balanced, ntree = 100, mtry = mtry_optimo_A)
 
 pred_rf_A <- predict(modelo_rf_A, newdata = test_A)
 
@@ -594,7 +673,7 @@ auc(roc_rf_A)
 
 
 # ------------------------------------------------------------
-# 14. Modelos Escenario B (sin notas previas)
+# 15. Modelos Escenario B (sin notas previas)
 # ------------------------------------------------------------
 
 # --- Regresión Logística ---
@@ -632,7 +711,8 @@ auc(roc_B)
 
 # --- Árbol de decisión ---
 
-modelo_arbol_B <- rpart(riesgo_suspenso ~ ., data = train_B_balanced, method = "class")
+modelo_arbol_B <- rpart(riesgo_suspenso ~ ., data = train_B_balanced, method = "class",
+                        control = rpart.control(cp = cp_optimo_B))
 rpart.plot(modelo_arbol_B)
 
 pred_arbol_B <- predict(modelo_arbol_B, newdata = test_B, type = "class")
@@ -665,7 +745,7 @@ auc(roc_arbol_B)
 
 # --- Random Forest ---
 
-modelo_rf_B <- randomForest(riesgo_suspenso ~ ., data = train_B_balanced, ntree = 100, mtry = 3)
+modelo_rf_B <- randomForest(riesgo_suspenso ~ ., data = train_B_balanced, ntree = 100, mtry = mtry_optimo_B)
 
 pred_rf_B <- predict(modelo_rf_B, newdata = test_B)
 
@@ -698,7 +778,7 @@ auc(roc_rf_B)
 
 
 # ------------------------------------------------------------
-# 15. Comparación final de modelos
+# 16. Comparación final de modelos
 # ------------------------------------------------------------
 
 comparacion <- data.frame(
@@ -774,7 +854,7 @@ ggplot(comparacion_long, aes(x = Modelo, y = Valor, fill = Escenario)) +
 
 
 # ------------------------------------------------------------
-# 16. Validación cruzada (Cross-validation)
+# 17. Validación cruzada (Cross-validation)
 # ------------------------------------------------------------
 
 control_cv <- trainControl(
