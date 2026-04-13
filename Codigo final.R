@@ -7,7 +7,7 @@
 # ------------------------------------------------------------
 # 1. Instalación y carga de librerías
 # ------------------------------------------------------------
-# Nota: ejecutar install.packages("ggcorrplot") si no está instalada
+
 
 library(tidyverse)
 library(caret)
@@ -103,7 +103,8 @@ str(datos)
 
 datos <- datos %>%
   mutate(
-    riesgo_suspenso = factor(ifelse(G3 < 10, "Si", "No"))
+    riesgo_suspenso = ifelse(G3 < 10, "Si", "No"),
+    riesgo_suspenso = factor(riesgo_suspenso, levels = c("Si", "No"))
   )
 
 table(datos$riesgo_suspenso)
@@ -224,7 +225,11 @@ datos <- datos %>%
     
     # Variables avanzadas nivel 1
     progreso_academico      = G3 - G1,
+    # Nota: progreso_academico contiene G3 (variable objetivo). Se mantiene
+    # para el análisis exploratorio pero NO se incluye en el modelado
+    # predictivo para evitar data leakage.
     rendimiento_relativo    = G3 - G3_mat,
+    # Nota: rendimiento_relativo también contiene G3. Misma razón anterior.
     riesgo_doble            = factor(ifelse(G3 < 10 & G3_mat < 10, "Si", "No")),
     apoyo_educativo         = as.numeric(schoolsup == "yes") +
       as.numeric(famsup == "yes") +
@@ -235,6 +240,9 @@ datos <- datos %>%
     # Variables avanzadas nivel 2
     indice_rendimiento_global   = (G1 + G2 + G1_mat + G2_mat) / 4,
     estabilidad_academica       = abs(G2 - G1) + abs(G2_mat - G1_mat),
+    # Nota: estabilidad_academica usa G1, G2, G1_mat y G2_mat. Se incluye en
+    # el Escenario A (con notas previas) pero NO en el Escenario B, cuya
+    # premisa es prescindir de calificaciones previas.
     interaccion_alcohol_estudio = alcohol_medio * (5 - studytime),
     perfil_familiar_riesgo      = as.numeric(Pstatus == "A") +
       as.numeric(famsup == "no") +
@@ -242,7 +250,11 @@ datos <- datos %>%
       as.numeric(educacion_familiar < 2)
   )
 
-names(datos)[39:52]
+# Variables excluidas del modelado por data leakage:
+# - progreso_academico: usa G3
+# - rendimiento_relativo: usa G3 y G3_mat
+# - riesgo_doble: usa G3 y G3_mat
+# Estas variables se conservan únicamente con fines exploratorios.
 
 
 # ------------------------------------------------------------
@@ -255,15 +267,18 @@ p17 <- ggplot(datos, aes(x = riesgo_suspenso, y = media_notas, fill = riesgo_sus
   scale_fill_manual(values = c("No" = "#2ecc71", "Si" = "#e74c3c")) +
   theme(legend.position = "none")
 
+# p18 y p19 se incluyen en el EDA con valor exploratorio.
+# progreso_academico y rendimiento_relativo NO entrarán en el modelado
+# al contener G3 (data leakage con la variable objetivo).
 p18 <- ggplot(datos, aes(x = riesgo_suspenso, y = progreso_academico, fill = riesgo_suspenso)) +
   geom_boxplot() +
-  labs(title = "Progreso académico vs riesgo", x = "Riesgo", y = "G3 - G1") +
+  labs(title = "Progreso académico vs riesgo (solo EDA)", x = "Riesgo", y = "G3 - G1") +
   scale_fill_manual(values = c("No" = "#2ecc71", "Si" = "#e74c3c")) +
   theme(legend.position = "none")
 
 p19 <- ggplot(datos, aes(x = riesgo_suspenso, y = rendimiento_relativo, fill = riesgo_suspenso)) +
   geom_boxplot() +
-  labs(title = "Rendimiento relativo vs riesgo", x = "Riesgo", y = "G3 Por - G3 Mat") +
+  labs(title = "Rendimiento relativo vs riesgo (solo EDA)", x = "Riesgo", y = "G3 Por - G3 Mat") +
   scale_fill_manual(values = c("No" = "#2ecc71", "Si" = "#e74c3c")) +
   theme(legend.position = "none")
 
@@ -281,7 +296,8 @@ p21 <- ggplot(datos, aes(x = riesgo_suspenso, y = perfil_riesgo_social, fill = r
 
 p22 <- ggplot(datos, aes(x = riesgo_doble, fill = riesgo_suspenso)) +
   geom_bar(position = "fill") +
-  labs(title = "Riesgo doble vs riesgo", x = "Suspende ambas", y = "Proporción") +
+  labs(title = "Riesgo doble vs riesgo (solo EDA)",
+       x = "Suspende ambas", y = "Proporción") +
   scale_fill_manual(values = c("No" = "#2ecc71", "Si" = "#e74c3c"))
 
 p23 <- ggplot(datos, aes(x = riesgo_suspenso, y = indice_rendimiento_global, fill = riesgo_suspenso)) +
@@ -337,7 +353,9 @@ ggcorrplot(variables_numericas,
 # 10. Selección de variables para modelado
 # ------------------------------------------------------------
 
-# Escenario A: con notas previas de ambas asignaturas
+# Escenario A: con notas previas de ambas asignaturas (19 variables)
+# Se excluyen progreso_academico y rendimiento_relativo por contener G3
+# (data leakage con la variable objetivo riesgo_suspenso).
 datos_modelo_A <- datos %>%
   select(
     riesgo_suspenso,
@@ -351,15 +369,15 @@ datos_modelo_A <- datos %>%
     alcohol_medio,
     apoyo_educativo,
     perfil_riesgo_social,
-    progreso_academico,
-    rendimiento_relativo,
     indice_rendimiento_global,
     estabilidad_academica,
     interaccion_alcohol_estudio,
     perfil_familiar_riesgo
   )
 
-# Escenario B: sin notas previas
+# Escenario B: sin notas previas (14 variables)
+# Se excluye estabilidad_academica porque usa G1, G2, G1_mat y G2_mat,
+# variables que contradicen la premisa de este escenario.
 datos_modelo_B <- datos %>%
   select(
     riesgo_suspenso,
@@ -372,20 +390,25 @@ datos_modelo_B <- datos %>%
     alcohol_medio,
     apoyo_educativo,
     perfil_riesgo_social,
-    riesgo_doble,
     interaccion_alcohol_estudio,
-    perfil_familiar_riesgo,
-    estabilidad_academica
+    perfil_familiar_riesgo
   )
 
 str(datos_modelo_A)
 str(datos_modelo_B)
 
+# Escenario B: sin notas previas ni variables derivadas de calificaciones finales
+# Se excluyen:
+# - G1, G2, G1_mat, G2_mat
+# - estabilidad_academica
+# - progreso_academico
+# - rendimiento_relativo
+# - riesgo_doble
+
 
 # ------------------------------------------------------------
 # 11. División en train y test (estratificada)
 # ------------------------------------------------------------
-
 
 # Escenario A
 train_index_A <- createDataPartition(datos_modelo_A$riesgo_suspenso, p = 0.7, list = FALSE)
@@ -407,7 +430,6 @@ prop.table(table(test_B$riesgo_suspenso))
 # ------------------------------------------------------------
 # 12. Balanceo de clases con ROSE
 # ------------------------------------------------------------
-
 
 # Balanceo Escenario A
 train_A_balanced <- ROSE(riesgo_suspenso ~ ., data = train_A, seed = 123)$data
@@ -434,6 +456,10 @@ barplot(prop.table(table(train_A_balanced$riesgo_suspenso)),
 
 par(mfrow = c(1, 1))
 
+# Se genera una versión balanceada del conjunto de entrenamiento para el ajuste
+# final de los modelos. En la búsqueda de hiperparámetros, el balanceo se aplica
+# dentro de cada fold mediante sampling = "rose" en trainControl.
+
 
 # ------------------------------------------------------------
 # 13. Búsqueda de hiperparámetros óptimos
@@ -443,15 +469,19 @@ control_hp <- trainControl(
   method = "cv",
   number = 5,
   classProbs = TRUE,
-  summaryFunction = twoClassSummary
+  summaryFunction = twoClassSummary,
+  sampling = "rose"
 )
+# Nota: sampling = "rose" dentro de trainControl aplica el balanceo
+# en cada fold de validación cruzada, evitando que observaciones
+# sintéticas se filtren a los folds de validación.
 
 # --- Árbol de decisión Escenario A ---
 grid_arbol <- expand.grid(cp = seq(0.001, 0.05, by = 0.005))
 
 busqueda_arbol_A <- train(
   riesgo_suspenso ~ .,
-  data = train_A_balanced,
+  data = train_A,
   method = "rpart",
   trControl = control_hp,
   tuneGrid = grid_arbol,
@@ -468,7 +498,7 @@ grid_rf <- expand.grid(mtry = c(2, 3, 4, 5, 6, 7))
 
 busqueda_rf_A <- train(
   riesgo_suspenso ~ .,
-  data = train_A_balanced,
+  data = train_A,
   method = "rf",
   trControl = control_hp,
   tuneGrid = grid_rf,
@@ -484,7 +514,7 @@ cat("mtry óptimo Escenario A:", mtry_optimo_A, "\n")
 # --- Árbol de decisión Escenario B ---
 busqueda_arbol_B <- train(
   riesgo_suspenso ~ .,
-  data = train_B_balanced,
+  data = train_B,
   method = "rpart",
   trControl = control_hp,
   tuneGrid = grid_arbol,
@@ -499,7 +529,7 @@ cat("cp óptimo Escenario B:", cp_optimo_B, "\n")
 # --- Random Forest Escenario B ---
 busqueda_rf_B <- train(
   riesgo_suspenso ~ .,
-  data = train_B_balanced,
+  data = train_B,
   method = "rf",
   trControl = control_hp,
   tuneGrid = grid_rf,
@@ -527,22 +557,6 @@ vif(modelo_logit_A)
 prob_A <- predict(modelo_logit_A, newdata = test_A, type = "response")
 pred_A <- ifelse(prob_A > 0.5, "Si", "No")
 
-# Métricas
-TP_A <- sum(pred_A == "Si" & test_A$riesgo_suspenso == "Si")
-TN_A <- sum(pred_A == "No" & test_A$riesgo_suspenso == "No")
-FP_A <- sum(pred_A == "Si" & test_A$riesgo_suspenso == "No")
-FN_A <- sum(pred_A == "No" & test_A$riesgo_suspenso == "Si")
-
-precision_A    <- TP_A / (TP_A + FP_A)
-recall_A       <- TP_A / (TP_A + FN_A)
-F1_A           <- 2 * (precision_A * recall_A) / (precision_A + recall_A)
-especificidad_A <- TN_A / (TN_A + FP_A)
-
-precision_A
-recall_A
-F1_A
-especificidad_A
-
 confusionMatrix(
   factor(pred_A, levels = c("No", "Si")),
   factor(test_A$riesgo_suspenso, levels = c("No", "Si")),
@@ -551,21 +565,6 @@ confusionMatrix(
 
 # Umbral ajustado 0.3
 pred_A_u <- ifelse(prob_A > 0.3, "Si", "No")
-
-TP_Au <- sum(pred_A_u == "Si" & test_A$riesgo_suspenso == "Si")
-TN_Au <- sum(pred_A_u == "No" & test_A$riesgo_suspenso == "No")
-FP_Au <- sum(pred_A_u == "Si" & test_A$riesgo_suspenso == "No")
-FN_Au <- sum(pred_A_u == "No" & test_A$riesgo_suspenso == "Si")
-
-precision_Au    <- TP_Au / (TP_Au + FP_Au)
-recall_Au       <- TP_Au / (TP_Au + FN_Au)
-F1_Au           <- 2 * (precision_Au * recall_Au) / (precision_Au + recall_Au)
-especificidad_Au <- TN_Au / (TN_Au + FP_Au)
-
-precision_Au
-recall_Au
-F1_Au
-especificidad_Au
 
 confusionMatrix(
   factor(pred_A_u, levels = c("No", "Si")),
@@ -592,8 +591,8 @@ resultados_umbral <- data.frame(
 )
 
 ggplot(resultados_umbral, aes(x = umbral)) +
-  geom_line(aes(y = recall, color = "Recall"), size = 1) +
-  geom_line(aes(y = precision, color = "Precision"), size = 1) +
+  geom_line(aes(y = recall, color = "Recall"), linewidth = 1) +
+  geom_line(aes(y = precision, color = "Precision"), linewidth = 1) +
   geom_vline(xintercept = 0.3, linetype = "dashed", color = "gray40") +
   labs(title = "Precision y Recall según umbral de decisión",
        x = "Umbral", y = "Valor", color = "Métrica") +
@@ -612,21 +611,6 @@ rpart.plot(modelo_arbol_A)
 
 pred_arbol_A <- predict(modelo_arbol_A, newdata = test_A, type = "class")
 
-TP_arbol_A <- sum(pred_arbol_A == "Si" & test_A$riesgo_suspenso == "Si")
-TN_arbol_A <- sum(pred_arbol_A == "No" & test_A$riesgo_suspenso == "No")
-FP_arbol_A <- sum(pred_arbol_A == "Si" & test_A$riesgo_suspenso == "No")
-FN_arbol_A <- sum(pred_arbol_A == "No" & test_A$riesgo_suspenso == "Si")
-
-precision_arbol_A    <- TP_arbol_A / (TP_arbol_A + FP_arbol_A)
-recall_arbol_A       <- TP_arbol_A / (TP_arbol_A + FN_arbol_A)
-F1_arbol_A           <- 2 * (precision_arbol_A * recall_arbol_A) / (precision_arbol_A + recall_arbol_A)
-especificidad_arbol_A <- TN_arbol_A / (TN_arbol_A + FP_arbol_A)
-
-precision_arbol_A
-recall_arbol_A
-F1_arbol_A
-especificidad_arbol_A
-
 confusionMatrix(
   factor(pred_arbol_A, levels = c("No", "Si")),
   factor(test_A$riesgo_suspenso, levels = c("No", "Si")),
@@ -640,24 +624,10 @@ auc(roc_arbol_A)
 
 # --- Random Forest ---
 
-modelo_rf_A <- randomForest(riesgo_suspenso ~ ., data = train_A_balanced, ntree = 100, mtry = mtry_optimo_A)
+modelo_rf_A <- randomForest(riesgo_suspenso ~ ., data = train_A_balanced,
+                            ntree = 100, mtry = mtry_optimo_A)
 
 pred_rf_A <- predict(modelo_rf_A, newdata = test_A)
-
-TP_rf_A <- sum(pred_rf_A == "Si" & test_A$riesgo_suspenso == "Si")
-TN_rf_A <- sum(pred_rf_A == "No" & test_A$riesgo_suspenso == "No")
-FP_rf_A <- sum(pred_rf_A == "Si" & test_A$riesgo_suspenso == "No")
-FN_rf_A <- sum(pred_rf_A == "No" & test_A$riesgo_suspenso == "Si")
-
-precision_rf_A    <- TP_rf_A / (TP_rf_A + FP_rf_A)
-recall_rf_A       <- TP_rf_A / (TP_rf_A + FN_rf_A)
-F1_rf_A           <- 2 * (precision_rf_A * recall_rf_A) / (precision_rf_A + recall_rf_A)
-especificidad_rf_A <- TN_rf_A / (TN_rf_A + FP_rf_A)
-
-precision_rf_A
-recall_rf_A
-F1_rf_A
-especificidad_rf_A
 
 confusionMatrix(
   factor(pred_rf_A, levels = c("No", "Si")),
@@ -684,21 +654,6 @@ summary(modelo_logit_B)
 prob_B <- predict(modelo_logit_B, newdata = test_B, type = "response")
 pred_B <- ifelse(prob_B > 0.5, "Si", "No")
 
-TP_B <- sum(pred_B == "Si" & test_B$riesgo_suspenso == "Si")
-TN_B <- sum(pred_B == "No" & test_B$riesgo_suspenso == "No")
-FP_B <- sum(pred_B == "Si" & test_B$riesgo_suspenso == "No")
-FN_B <- sum(pred_B == "No" & test_B$riesgo_suspenso == "Si")
-
-precision_B    <- TP_B / (TP_B + FP_B)
-recall_B       <- TP_B / (TP_B + FN_B)
-F1_B           <- 2 * (precision_B * recall_B) / (precision_B + recall_B)
-especificidad_B <- TN_B / (TN_B + FP_B)
-
-precision_B
-recall_B
-F1_B
-especificidad_B
-
 confusionMatrix(
   factor(pred_B, levels = c("No", "Si")),
   factor(test_B$riesgo_suspenso, levels = c("No", "Si")),
@@ -717,21 +672,6 @@ rpart.plot(modelo_arbol_B)
 
 pred_arbol_B <- predict(modelo_arbol_B, newdata = test_B, type = "class")
 
-TP_arbol_B <- sum(pred_arbol_B == "Si" & test_B$riesgo_suspenso == "Si")
-TN_arbol_B <- sum(pred_arbol_B == "No" & test_B$riesgo_suspenso == "No")
-FP_arbol_B <- sum(pred_arbol_B == "Si" & test_B$riesgo_suspenso == "No")
-FN_arbol_B <- sum(pred_arbol_B == "No" & test_B$riesgo_suspenso == "Si")
-
-precision_arbol_B    <- TP_arbol_B / (TP_arbol_B + FP_arbol_B)
-recall_arbol_B       <- TP_arbol_B / (TP_arbol_B + FN_arbol_B)
-F1_arbol_B           <- 2 * (precision_arbol_B * recall_arbol_B) / (precision_arbol_B + recall_arbol_B)
-especificidad_arbol_B <- TN_arbol_B / (TN_arbol_B + FP_arbol_B)
-
-precision_arbol_B
-recall_arbol_B
-F1_arbol_B
-especificidad_arbol_B
-
 confusionMatrix(
   factor(pred_arbol_B, levels = c("No", "Si")),
   factor(test_B$riesgo_suspenso, levels = c("No", "Si")),
@@ -745,24 +685,10 @@ auc(roc_arbol_B)
 
 # --- Random Forest ---
 
-modelo_rf_B <- randomForest(riesgo_suspenso ~ ., data = train_B_balanced, ntree = 100, mtry = mtry_optimo_B)
+modelo_rf_B <- randomForest(riesgo_suspenso ~ ., data = train_B_balanced,
+                            ntree = 100, mtry = mtry_optimo_B)
 
 pred_rf_B <- predict(modelo_rf_B, newdata = test_B)
-
-TP_rf_B <- sum(pred_rf_B == "Si" & test_B$riesgo_suspenso == "Si")
-TN_rf_B <- sum(pred_rf_B == "No" & test_B$riesgo_suspenso == "No")
-FP_rf_B <- sum(pred_rf_B == "Si" & test_B$riesgo_suspenso == "No")
-FN_rf_B <- sum(pred_rf_B == "No" & test_B$riesgo_suspenso == "Si")
-
-precision_rf_B    <- TP_rf_B / (TP_rf_B + FP_rf_B)
-recall_rf_B       <- TP_rf_B / (TP_rf_B + FN_rf_B)
-F1_rf_B           <- 2 * (precision_rf_B * recall_rf_B) / (precision_rf_B + recall_rf_B)
-especificidad_rf_B <- TN_rf_B / (TN_rf_B + FP_rf_B)
-
-precision_rf_B
-recall_rf_B
-F1_rf_B
-especificidad_rf_B
 
 confusionMatrix(
   factor(pred_rf_B, levels = c("No", "Si")),
@@ -781,38 +707,41 @@ auc(roc_rf_B)
 # 16. Comparación final de modelos
 # ------------------------------------------------------------
 
-comparacion <- data.frame(
-  Escenario = c("A", "A", "A", "A", "B", "B", "B"),
-  Modelo = c("Logística (0.5)", "Logística (0.3)", "Árbol", "Random Forest",
-             "Logística", "Árbol", "Random Forest"),
-  Accuracy = c(
-    mean(pred_A == test_A$riesgo_suspenso),
-    mean(pred_A_u == test_A$riesgo_suspenso),
-    mean(pred_arbol_A == test_A$riesgo_suspenso),
-    mean(pred_rf_A == test_A$riesgo_suspenso),
-    mean(pred_B == test_B$riesgo_suspenso),
-    mean(pred_arbol_B == test_B$riesgo_suspenso),
-    mean(pred_rf_B == test_B$riesgo_suspenso)
-  ),
-  Precision = c(precision_A, precision_Au, precision_arbol_A, precision_rf_A,
-                precision_B, precision_arbol_B, precision_rf_B),
-  Recall    = c(recall_A, recall_Au, recall_arbol_A, recall_rf_A,
-                recall_B, recall_arbol_B, recall_rf_B),
-  F1        = c(F1_A, F1_Au, F1_arbol_A, F1_rf_A,
-                F1_B, F1_arbol_B, F1_rf_B),
-  Especificidad = c(especificidad_A, especificidad_Au, especificidad_arbol_A, especificidad_rf_A,
-                    especificidad_B, especificidad_arbol_B, especificidad_rf_B),
-  AUC = c(
-    round(auc(roc_A), 3),
-    round(auc(roc_A), 3),
-    round(auc(roc_arbol_A), 3),
-    round(auc(roc_rf_A), 3),
-    round(auc(roc_B), 3),
-    round(auc(roc_arbol_B), 3),
-    round(auc(roc_rf_B), 3)
+# Las métricas se extraen directamente de confusionMatrix()
+# para evitar cálculos manuales redundantes.
+
+cm_logit_A   <- confusionMatrix(factor(pred_A,       levels = c("No","Si")), factor(test_A$riesgo_suspenso, levels = c("No","Si")), positive = "Si")
+cm_logit_Au  <- confusionMatrix(factor(pred_A_u,     levels = c("No","Si")), factor(test_A$riesgo_suspenso, levels = c("No","Si")), positive = "Si")
+cm_arbol_A   <- confusionMatrix(factor(pred_arbol_A, levels = c("No","Si")), factor(test_A$riesgo_suspenso, levels = c("No","Si")), positive = "Si")
+cm_rf_A      <- confusionMatrix(factor(pred_rf_A,    levels = c("No","Si")), factor(test_A$riesgo_suspenso, levels = c("No","Si")), positive = "Si")
+cm_logit_B   <- confusionMatrix(factor(pred_B,       levels = c("No","Si")), factor(test_B$riesgo_suspenso, levels = c("No","Si")), positive = "Si")
+cm_arbol_B   <- confusionMatrix(factor(pred_arbol_B, levels = c("No","Si")), factor(test_B$riesgo_suspenso, levels = c("No","Si")), positive = "Si")
+cm_rf_B      <- confusionMatrix(factor(pred_rf_B,    levels = c("No","Si")), factor(test_B$riesgo_suspenso, levels = c("No","Si")), positive = "Si")
+
+extraer_metricas <- function(cm, roc_obj, nombre, escenario) {
+  data.frame(
+    Escenario   = escenario,
+    Modelo      = nombre,
+    Accuracy    = round(cm$overall["Accuracy"], 3),
+    Precision   = round(cm$byClass["Precision"], 3),
+    Recall      = round(cm$byClass["Recall"], 3),
+    F1          = round(cm$byClass["F1"], 3),
+    Especificidad = round(cm$byClass["Specificity"], 3),
+    AUC         = round(auc(roc_obj), 3)
   )
+}
+
+comparacion <- rbind(
+  extraer_metricas(cm_logit_A,  roc_A,       "Logística (0.5)", "A"),
+  extraer_metricas(cm_logit_Au, roc_A,       "Logística (0.3)", "A"),
+  extraer_metricas(cm_arbol_A,  roc_arbol_A, "Árbol",           "A"),
+  extraer_metricas(cm_rf_A,     roc_rf_A,    "Random Forest",   "A"),
+  extraer_metricas(cm_logit_B,  roc_B,       "Logística",       "B"),
+  extraer_metricas(cm_arbol_B,  roc_arbol_B, "Árbol",           "B"),
+  extraer_metricas(cm_rf_B,     roc_rf_B,    "Random Forest",   "B")
 )
 
+row.names(comparacion) <- NULL
 comparacion
 
 # Curva ROC comparativa A vs B
@@ -857,29 +786,33 @@ ggplot(comparacion_long, aes(x = Modelo, y = Valor, fill = Escenario)) +
 # 17. Validación cruzada (Cross-validation)
 # ------------------------------------------------------------
 
+# Se usa sampling = "rose" dentro de trainControl para aplicar
+# el balanceo en cada fold, siendo consistente con la sección 13.
 control_cv <- trainControl(
   method = "cv",
   number = 5,
   classProbs = TRUE,
   summaryFunction = twoClassSummary,
-  savePredictions = TRUE
+  savePredictions = TRUE,
+  sampling = "rose"
 )
 
-# Escenario A
+# Escenario A — se usa train_A (sin balancear) para que ROSE
+# actúe dentro de cada fold via trainControl
 cv_logit_A <- train(
-  riesgo_suspenso ~ ., data = datos_modelo_A,
+  riesgo_suspenso ~ ., data = train_A,
   method = "glm", family = "binomial",
   trControl = control_cv, metric = "ROC"
 )
 
 cv_arbol_A <- train(
-  riesgo_suspenso ~ ., data = datos_modelo_A,
+  riesgo_suspenso ~ ., data = train_A,
   method = "rpart",
   trControl = control_cv, metric = "ROC"
 )
 
 cv_rf_A <- train(
-  riesgo_suspenso ~ ., data = datos_modelo_A,
+  riesgo_suspenso ~ ., data = train_A,
   method = "rf",
   trControl = control_cv, metric = "ROC",
   ntree = 100
@@ -887,19 +820,19 @@ cv_rf_A <- train(
 
 # Escenario B
 cv_logit_B <- train(
-  riesgo_suspenso ~ ., data = datos_modelo_B,
+  riesgo_suspenso ~ ., data = train_B,
   method = "glm", family = "binomial",
   trControl = control_cv, metric = "ROC"
 )
 
 cv_arbol_B <- train(
-  riesgo_suspenso ~ ., data = datos_modelo_B,
+  riesgo_suspenso ~ ., data = train_B,
   method = "rpart",
   trControl = control_cv, metric = "ROC"
 )
 
 cv_rf_B <- train(
-  riesgo_suspenso ~ ., data = datos_modelo_B,
+  riesgo_suspenso ~ ., data = train_B,
   method = "rf",
   trControl = control_cv, metric = "ROC",
   ntree = 100
@@ -917,41 +850,3 @@ resultados_cv <- resamples(list(
 
 summary(resultados_cv)
 dotplot(resultados_cv, main = "Comparación de modelos mediante Cross-Validation")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
